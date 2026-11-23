@@ -44,6 +44,23 @@
   code { background: var(--bg); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
   .empty { color: #656d76; font-size: 13px; padding: 8px 0; }
   .rs { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; background: var(--bg); padding: 6px 8px; border-radius: 6px; }
+  .trial-grid { display: grid; grid-template-columns: 380px 1fr; gap: 18px; }
+  @media (max-width: 960px) { .trial-grid { grid-template-columns: 1fr; } }
+  .trial-banner { border-radius: 6px; padding: 10px 12px; font-size: 13px; margin: 10px 0; }
+  .trial-banner.info { background: #ddf4ff; border: 1px solid #54aeff; color: #0a3069; }
+  .trial-banner.warn { background: #fff8c5; border: 1px solid #e3b341; color: var(--amber); }
+  .trial-banner.error { background: #ffebe9; border: 1px solid #ffabaf; color: var(--red); }
+  .trial-banner.ok { background: #dafbe1; border: 1px solid #4ac26b; color: var(--green); }
+  select { width: 100%; padding: 7px 9px; border: 1px solid var(--bd); border-radius: 6px; font-size: 13px; font-family: inherit; }
+  .tpl-chip { display: inline-block; background: var(--bg); border: 1px solid var(--bd); border-radius: 12px; padding: 2px 10px; margin: 3px 4px 3px 0; font-size: 12px; font-family: ui-monospace, monospace; }
+  .frame-tag { font-family: ui-monospace, monospace; }
+  .frame-tag.fire { color: var(--red); font-weight: 700; }
+  .frame-tag.block { color: var(--amber); font-weight: 700; }
+  .frame-tag.keep { color: var(--green); font-weight: 700; }
+  .trial-stat { display: inline-block; margin-right: 18px; font-size: 13px; }
+  .trial-stat b { font-size: 16px; }
+  .muted { color: #656d76; }
+  button.secondary { background: #6e7781; }
 </style>
 </head>
 <body>
@@ -72,6 +89,14 @@
     <textarea id="receipts" rows="4" placeholder="支持换行、逗号或空格分隔，例如 3 10 17"></textarea>
     <p class="hint">录制开始时可能仍在冷却，剩余帧数 r ∈ [0, 冷却帧数]，每种 r 为一种解释，系统会对全部解释一次性核对。</p>
     <button id="runBtn">开始核对</button>
+
+    <h2 style="margin-top:22px; border-top:1px solid var(--bd); padding-top:16px;">过滤试跑参数</h2>
+    <div class="row">
+      <div><label for="tolerance">容差（非负整数）</label><input type="number" id="tolerance" value="0" min="0" step="1" /></div>
+    </div>
+    <label for="protected">要保住的真口令帧（至少 1 个）</label>
+    <textarea id="protected" rows="3" placeholder="支持换行、逗号或空格分隔，例如 30 52"></textarea>
+    <p class="hint">试跑复用上方的分数、阈值与冷却帧数，从可触发状态（初始冷却剩余 0）按原规则回放。</p>
   </section>
 
   <section class="card">
@@ -93,6 +118,49 @@
       <div class="table-wrap"><table id="rejectTable"></table></div>
     </div>
     <div id="placeholder" class="empty">提交核对后，结论、补记列表与 CSV 下载会显示在这里。</div>
+  </section>
+
+  <section class="card" style="grid-column: 1 / -1;">
+    <h2>过滤试跑（背景声模板拦截）</h2>
+    <p class="hint" style="margin-top:0;">
+      针对"同一类背景声反复被认成唤醒词"：从可触发状态按原规则回放，挑一个未标注的当前触发帧（须有完整前 7 帧），
+      取该帧与前 7 帧共 8 个分数作模板，最多累计 8 条。每次加入都从原分数重放：达阈且未冷却的帧与任一模板的
+      逐项绝对差之和不超过容差即被拦下且<strong>不启动冷却</strong>；漏掉任一真口令帧则该模板被拒绝、保留原模板与原结果。
+      改动分数、阈值、冷却、容差或真口令帧都会结束当前试跑。
+    </p>
+    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <button id="trialStartBtn" style="width:auto; margin-top:0; padding:9px 18px;">开始试跑</button>
+      <button id="trialEndBtn" class="secondary" style="width:auto; margin-top:0; padding:9px 18px;" disabled>结束试跑</button>
+      <span id="trialStatus" class="hint"></span>
+    </div>
+    <div id="trialBanner"></div>
+    <div id="trialPanel" hidden>
+      <div id="trialMeta"></div>
+
+      <div class="section-title">已生效模板（最多 8 条）<span id="tplBadge" class="badge pending"></span></div>
+      <div id="tplList"><span class="empty">尚无模板。</span></div>
+
+      <div class="section-title">加入模板：选择一个未标注的当前触发帧</div>
+      <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
+        <div style="flex:1; min-width:260px;">
+          <label for="candidateSelect" style="margin-top:0;">候选帧（当前回放触发、非真口令帧、帧号 ≥ 7、未作过模板）</label>
+          <select id="candidateSelect"></select>
+        </div>
+        <button id="addTplBtn" style="width:auto; margin-top:0; padding:9px 18px;">加入并重放</button>
+      </div>
+      <div id="candidateWindow" class="hint" style="margin-top:6px;"></div>
+
+      <div class="section-title">回放结果</div>
+      <div id="trialStats"></div>
+      <div class="table-wrap" style="max-height:260px;">
+        <table id="triggerTable"></table>
+      </div>
+      <div class="section-title">拦截帧（命中模板、不启动冷却）<span id="blockedBadge" class="badge conflict"></span></div>
+      <div class="table-wrap" style="max-height:260px;">
+        <table id="blockedTable"></table>
+      </div>
+    </div>
+    <div id="trialPlaceholder" class="empty">填好左侧参数（含容差和至少一个真口令帧）后点击"开始试跑"。</div>
   </section>
 </main>
 
@@ -242,6 +310,208 @@ $("runBtn").addEventListener("click", async () => {
     btn.textContent = "开始核对";
   }
 });
+
+// ==================== 过滤试跑 ====================
+const trialInputIds = ["scores", "threshold", "cooldown", "tolerance", "protected"];
+let trialSessionId = null;
+let trialReqSeq = 0;          // 请求世代：输入改动即 +1，迟到响应据此作废
+let trialData = null;         // 最近一次生效的回放结果
+let trialBusy = false;
+
+function trialBanner(kind, text) {
+  const el = $("trialBanner");
+  if (!text) { el.innerHTML = ""; return; }
+  el.innerHTML = `<div class="trial-banner ${kind}">${text}</div>`;
+}
+
+function endTrial(reason) {
+  trialSessionId = null;
+  trialData = null;
+  trialReqSeq++;  // 所有在途响应作废
+  $("trialPanel").hidden = true;
+  $("trialPlaceholder").hidden = false;
+  $("trialEndBtn").disabled = true;
+  $("trialStartBtn").disabled = false;
+  $("trialStartBtn").textContent = "开始试跑";
+  $("trialStatus").textContent = "";
+  if (reason) trialBanner("warn", reason);
+}
+
+// 改动试跑相关输入即结束试跑（迟到结果作废）
+trialInputIds.forEach((id) => $(id).addEventListener("input", () => {
+  if (trialSessionId !== null) endTrial("试跑输入已修改，本次试跑结束，迟到结果已作废。");
+}));
+$("scoresFile").addEventListener("change", () => {
+  if (trialSessionId !== null) endTrial("分数文件已更换，本次试跑结束，迟到结果已作废。");
+});
+
+function renderTrial(data) {
+  trialData = data;
+  $("trialPanel").hidden = false;
+  $("trialPlaceholder").hidden = true;
+  $("trialEndBtn").disabled = false;
+  $("trialStatus").textContent =
+    `会话 ${trialSessionId.slice(0, 8)}… · 模板 ${data.template_count}/${data.template_limit}`;
+
+  $("trialMeta").innerHTML = `
+    <span class="trial-stat"><span class="hint">帧数</span><br><b>${data.frame_count}</b></span>
+    <span class="trial-stat"><span class="hint">阈值 / 冷却</span><br><b>${data.threshold} / ${data.cooldown}</b></span>
+    <span class="trial-stat"><span class="hint">容差</span><br><b>${data.tolerance}</b></span>
+    <span class="trial-stat"><span class="hint">真口令帧</span><br><b class="frame-tag keep">[${data.protected.join(", ")}]</b></span>`;
+
+  $("tplBadge").textContent = `${data.template_count}/${data.template_limit} 条`;
+  if (!data.templates.length) {
+    $("tplList").innerHTML = '<span class="empty">尚无模板。</span>';
+  } else {
+    $("tplList").innerHTML = data.templates.map((t) =>
+      `<span class="tpl-chip">#${t.index} 来源帧 ${t.source_frame}｜窗口 [${t.window.join(", ")}]</span>`
+    ).join("");
+  }
+
+  const sel = $("candidateSelect");
+  if (data.candidates.length) {
+    sel.innerHTML = data.candidates.map((f) =>
+      `<option value="${f}">帧 ${f}（当前分数 ${data.trigger_scores[f]}）</option>`
+    ).join("");
+    $("addTplBtn").disabled = data.template_count >= data.template_limit;
+  } else {
+    sel.innerHTML = '<option value="">（没有可选的候选帧）</option>';
+    $("addTplBtn").disabled = true;
+  }
+  showCandidateWindow();
+
+  const st = data.stats;
+  const verdict = data.passed
+    ? '<span class="badge ok">通过</span> 全部真口令帧都在触发帧里。'
+    : '<span class="badge conflict">不通过</span> 有真口令帧漏触发。';
+  $("trialStats").innerHTML = `
+    <div style="margin:6px 0;">${verdict}</div>
+    <span class="trial-stat"><span class="hint">触发帧</span> <b>${st.trigger_count}</b></span>
+    <span class="trial-stat"><span class="hint">拦截帧</span> <b>${st.blocked_count}</b></span>
+    <span class="trial-stat"><span class="hint">真口令漏报</span> <b>${st.missed_count}</b></span>
+    <span class="trial-stat"><span class="hint">距离计算条数</span> <b>${st.distance_evaluations}</b></span>
+    <span class="trial-stat muted"><span class="hint">进入比对帧数</span> ${st.compared_frames}</span>`;
+  if (data.missed_protected.length) {
+    trialBanner("error", `漏掉真口令帧：[${data.missed_protected.join(", ")}]（若为加模板的响应，该模板已被拒绝，原模板与原结果保留）。`);
+  } else {
+    trialBanner("ok", "当前模板集回放通过：真口令帧全部保住。");
+  }
+
+  renderTable($("triggerTable"), ["帧号", "分数", "标注"],
+    data.triggers.map((f) => {
+      const tag = data.protected.includes(f)
+        ? '<span class="frame-tag keep">真口令</span>'
+        : '<span class="frame-tag fire">触发</span>';
+      return [`<span class="frame-tag fire">${f}</span>`, data.trigger_scores[f], tag];
+    }), "无触发帧");
+  $("blockedBadge").textContent = `${st.blocked_count} 帧`;
+  renderTable($("blockedTable"), ["帧号", "分数", "命中模板", "L1 距离", "8 帧窗口"],
+    data.blocked.map((b) => [
+      `<span class="frame-tag block">${b.frame}</span>`,
+      b.score,
+      `#${b.template_index}`,
+      b.distance,
+      `<span class="tpl-chip">[${b.window.join(", ")}]</span>`,
+    ]), "无拦截帧");
+}
+
+function showCandidateWindow() {
+  const f = Number($("candidateSelect").value);
+  if (!trialData || !Number.isInteger(f)) { $("candidateWindow").textContent = ""; return; }
+  $("candidateWindow").textContent =
+    `将取帧 ${f} 及其前 7 帧（帧 ${f - 7}..${f}）的 8 个分数作为新模板，加入后立即从原分数重放。`;
+}
+$("candidateSelect").addEventListener("change", showCandidateWindow);
+
+$("trialStartBtn").addEventListener("click", async () => {
+  let payload;
+  try {
+    const scores = parseIntList($("scores").value, "分数");
+    const protectedFrames = parseIntList($("protected").value, "真口令帧");
+    if (!scores.length) throw new Error("分数序列不能为空。");
+    if (!protectedFrames.length) throw new Error("至少提供一个要保住的真口令帧。");
+    const tolerance = Number($("tolerance").value);
+    if (!Number.isInteger(tolerance) || tolerance < 0) {
+      throw new Error("容差必须是非负整数。");
+    }
+    payload = {
+      scores,
+      threshold: Number($("threshold").value),
+      cooldown: Number($("cooldown").value),
+      tolerance,
+      protected: protectedFrames,
+    };
+  } catch (err) {
+    trialBanner("error", `输入解析失败：${err.message}`);
+    return;
+  }
+  const seq = ++trialReqSeq;
+  const btn = $("trialStartBtn");
+  btn.disabled = true;
+  btn.textContent = "试跑回放中…";
+  try {
+    const resp = await fetch("/api/trial/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (seq !== trialReqSeq) return;  // 迟到结果作废
+    if (!resp.ok) {
+      trialBanner("error", `无法开始试跑：${data.detail || resp.statusText}`);
+      return;
+    }
+    trialSessionId = data.session_id;
+    renderTrial(data);
+  } catch (err) {
+    if (seq === trialReqSeq) trialBanner("error", `请求失败：${err.message}`);
+  } finally {
+    if (seq === trialReqSeq) {
+      btn.disabled = false;
+      btn.textContent = "重新开始试跑";
+    }
+  }
+});
+
+$("addTplBtn").addEventListener("click", async () => {
+  if (!trialSessionId || trialBusy) return;
+  const frame = Number($("candidateSelect").value);
+  if (!Number.isInteger(frame)) return;
+  const seq = trialReqSeq;
+  trialBusy = true;
+  const btn = $("addTplBtn");
+  btn.disabled = true;
+  btn.textContent = "重放中…";
+  try {
+    const resp = await fetch(`/api/trial/${trialSessionId}/template`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ frame }),
+    });
+    const data = await resp.json();
+    if (seq !== trialReqSeq) return;  // 输入已改、试跑已结束：迟到结果作废
+    if (!resp.ok) {
+      trialBanner("error", `模板被拒绝：${data.detail || resp.statusText}`);
+      return;
+    }
+    renderTrial(data);  // 先按保留下来的状态渲染，再覆盖成拒绝提示
+    if (!data.accepted) {
+      trialBanner("error",
+        `模板（来源帧 ${data.rejected_frame}）会漏掉真口令帧 [${data.candidate_missed_protected.join(", ")}]，`
+        + "已拒绝该模板，原有模板与回放结果保留。");
+    }
+  } catch (err) {
+    if (seq === trialReqSeq) trialBanner("error", `请求失败：${err.message}`);
+  } finally {
+    trialBusy = false;
+    if (seq === trialReqSeq) {
+      btn.textContent = "加入并重放";
+      btn.disabled = $("candidateSelect").value === "" || (trialData && trialData.template_count >= trialData.template_limit);
+    }
+  }
+});
+
+$("trialEndBtn").addEventListener("click", () => endTrial("试跑已手动结束。"));
 </script>
 </body>
 </html>
